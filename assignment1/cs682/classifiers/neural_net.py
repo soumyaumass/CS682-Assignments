@@ -80,6 +80,7 @@ class TwoLayerNet(object):
     if y is None:
       return scores
 
+    
     # Compute the loss
     loss = None
     # Calculating Softmax Loss

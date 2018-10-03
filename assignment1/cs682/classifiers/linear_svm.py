@@ -85,7 +85,7 @@ def svm_loss_vectorized(W, X, y, reg):
   
   #adding X[i] gradients
   dW = (np.matmul(margin_count_matrix.T,X)).T
-  
+  # Matrix containing summation of all the -1*X terms of dW
   margin_times_X = positive_margin_per_image.reshape(X.shape[0],1)*X
   
   #adding -X[i] for the correct classes
