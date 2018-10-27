@@ -135,12 +135,18 @@ class FullyConnectedNet(object):
         self.params = {}
         for layer in range(self.num_layers):
             if layer == 0:
+                if self.normalization =='batchnorm' or self.normalization =='layernorm':
+                    self.params.update({'gamma' + str(layer+1) : np.ones(hidden_dims[layer])})
+                    self.params.update({'beta' + str(layer+1) : np.zeros(hidden_dims[layer])})
                 self.params.update({'W' + str(layer+1) : weight_scale * np.random.randn(input_dim, hidden_dims[layer])})
                 self.params.update({'b' + str(layer+1) : np.zeros(hidden_dims[layer])})
             elif layer == self.num_layers - 1:
                 self.params.update({'W' + str(layer+1) : weight_scale * np.random.randn(hidden_dims[layer-1], num_classes)})
                 self.params.update({'b' + str(layer+1) : np.zeros(num_classes)})
             else:
+                if self.normalization =='batchnorm' or self.normalization =='layernorm':
+                    self.params.update({'gamma' + str(layer+1) : np.ones(hidden_dims[layer])})
+                    self.params.update({'beta' + str(layer+1) : np.zeros(hidden_dims[layer])})
                 self.params.update({'W' + str(layer+1) : weight_scale * np.random.randn(hidden_dims[layer-1], hidden_dims[layer])})
                 self.params.update({'b' + str(layer+1) : np.zeros(hidden_dims[layer])})
 
@@ -205,15 +211,31 @@ class FullyConnectedNet(object):
 
         hidden_scores = {}
         hidden_caches = {}
+        hidden_affine_caches = {}
+        hidden_batchnorm_caches = {}
+        hidden_layernorm_caches = {}
+        hidden_relu_caches = {}
         dropout_caches = {}
 
         for layer in range(self.num_layers - 1):
             if layer == 0:
-                hidden_scores[layer], hidden_caches[layer] = affine_relu_forward(X, self.params['W'+str(layer+1)],self.params['b'+str(layer+1)])
+                if self.normalization =='batchnorm' or self.normalization =='layernorm':
+                    hidden_scores[layer], hidden_affine_caches[layer] = affine_forward(X, self.params['W'+str(layer+1)],self.params['b'+str(layer+1)])
+                else:
+                    hidden_scores[layer], hidden_caches[layer] = affine_relu_forward(X, self.params['W'+str(layer+1)],self.params['b'+str(layer+1)])
             else:
-                hidden_scores[layer], hidden_caches[layer] = affine_relu_forward(hidden_scores[layer-1], self.params['W'+str(layer+1)],self.params['b'+str(layer+1)])
+                if self.normalization =='batchnorm' or self.normalization =='layernorm':
+                    hidden_scores[layer], hidden_affine_caches[layer] = affine_forward(hidden_scores[layer-1], self.params['W'+str(layer+1)],self.params['b'+str(layer+1)])
+                else:
+                    hidden_scores[layer], hidden_caches[layer] = affine_relu_forward(hidden_scores[layer-1], self.params['W'+str(layer+1)],self.params['b'+str(layer+1)])
+            if self.normalization == 'batchnorm':
+                hidden_scores[layer], hidden_batchnorm_caches[layer] = batchnorm_forward(hidden_scores[layer], self.params['gamma'+str(layer+1)], self.params['beta'+str(layer+1)], self.bn_params[layer])
+                hidden_scores[layer], hidden_relu_caches[layer] = relu_forward(hidden_scores[layer])
+            if self.normalization == 'layernorm':
+                hidden_scores[layer], hidden_layernorm_caches[layer] = layernorm_forward(hidden_scores[layer], self.params['gamma'+str(layer+1)], self.params['beta'+str(layer+1)], self.bn_params[layer])
+                hidden_scores[layer], hidden_relu_caches[layer] = relu_forward(hidden_scores[layer])
             if self.use_dropout:
-                hidden_scores[layer], dropout_caches[layer] = dropout_forward(hidden_scores[layer],self.dropout_param)
+                hidden_scores[layer], dropout_caches[layer] = dropout_forward(hidden_scores[layer], self.dropout_param)
 
         scores, cache = affine_forward(hidden_scores[self.num_layers - 2], self.params['W'+str(self.num_layers)], self.params['b'+str(self.num_layers)])
         
@@ -244,15 +266,26 @@ class FullyConnectedNet(object):
             l2_sum += np.sum(self.params['W'+str(i+1)]**2)
         loss += 0.5 * self.reg * l2_sum
 
-
         dhidden = {}
         for layer in range(self.num_layers-1,-1,-1):
+            if self.normalization =='batchnorm' and layer != self.num_layers-1:
+                    dhidden[layer] = relu_backward(dhidden[layer], hidden_relu_caches[layer])
+                    dhidden[layer], grads['gamma'+str(layer+1)], grads['beta'+str(layer+1)] = batchnorm_backward(dhidden[layer], hidden_batchnorm_caches[layer])
+            if self.normalization =='layernorm' and layer != self.num_layers-1:
+                    dhidden[layer] = relu_backward(dhidden[layer], hidden_relu_caches[layer])
+                    dhidden[layer], grads['gamma'+str(layer+1)], grads['beta'+str(layer+1)] = layernorm_backward(dhidden[layer], hidden_layernorm_caches[layer])
             if layer == self.num_layers-1:
                 dhidden[layer-1], grads['W'+str(layer+1)], grads['b'+str(layer+1)]  = affine_backward(dout, cache)
             elif layer == 0:
-                dX, grads['W'+str(layer+1)], grads['b'+str(layer+1)]  = affine_relu_backward(dhidden[layer], hidden_caches[layer])
+                if self.normalization =='batchnorm' or self.normalization =='layernorm':
+                    dX, grads['W'+str(layer+1)], grads['b'+str(layer+1)] = affine_backward(dhidden[layer], hidden_affine_caches[layer])
+                else:
+                    dX, grads['W'+str(layer+1)], grads['b'+str(layer+1)]  = affine_relu_backward(dhidden[layer], hidden_caches[layer])
             else:
-                dhidden[layer-1], grads['W'+str(layer+1)], grads['b'+str(layer+1)]  = affine_relu_backward(dhidden[layer], hidden_caches[layer])
+                if self.normalization =='batchnorm' or self.normalization =='layernorm':
+                    dhidden[layer-1], grads['W'+str(layer+1)], grads['b'+str(layer+1)] = affine_backward(dhidden[layer], hidden_affine_caches[layer])
+                else:
+                    dhidden[layer-1], grads['W'+str(layer+1)], grads['b'+str(layer+1)]  = affine_relu_backward(dhidden[layer], hidden_caches[layer])
             if self.use_dropout and layer:
                 dhidden[layer-1] = dropout_backward(dhidden[layer-1], dropout_caches[layer-1])
             grads['W'+str(layer+1)] += self.reg*self.params['W'+str(layer+1)]
